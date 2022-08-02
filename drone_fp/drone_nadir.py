@@ -13,7 +13,7 @@ import exiftool
 import datetime
 from operator import itemgetter
 import geopandas as gp
-import fiona
+import fiona.crs
 from functools import partial
 import pyproj
 import math
@@ -271,9 +271,9 @@ def writeOutputtoText(filename, file_list):
     :return:
     """
     dst_n = outdir + '/' + filename
-    if not os.path.exists(dst_n):
-        os.makedirs(dst_n)
-        os.chmod(dst_n, 0o777)
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+        os.chmod(outdir, 0o777)
     with open(dst_n, 'w') as outfile:
         geojson.dump(file_list, outfile, indent=4, sort_keys=False)
     print(color.GREEN + "GeoJSON Produced." + color.END)
@@ -328,11 +328,12 @@ def image_poly(imgar):
         gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc1, 'height': calc2}, index=[1])
         repo = convert_wgs_to_utm(lng, lat)
         repo = '%g'%(float(repo))
-        gf.crs = fiona.crs.from_epsg(4326)
+        #gf.crs = fiona.crs.from_epsg(4326)
 
         # create center as a shapely geometry point type and set geometry of dataframe to this
         gf['center'] = gf.apply(lambda x: shapely.geometry.Point(x['lon'], x['lat']), axis=1)
         gf = gf.set_geometry('center')
+        gf.crs = fiona.crs.from_epsg(4326)
         # change crs of dataframe to projected crs to enable use of distance for width/height
         # gf = gf.to_crs(epsg=repo)
         gf = gf.to_crs(epsg=3857)
