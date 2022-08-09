@@ -22,6 +22,7 @@ import ntpath
 from geojson_rewind import rewind
 from progress.bar import Bar
 
+from vincenty import vincenty_inverse
 
 parser = argparse.ArgumentParser(description="Input Mission JSON File")
 parser.add_argument("-i", "--indir", help="Input directory", required=True)
@@ -211,12 +212,12 @@ def format_data(exif_array):
             long = float(tags['Composite:GPSLongitude'])
             imgwidth = tags['EXIF:ExifImageWidth']
             imghite = tags['EXIF:ExifImageHeight']
-            alt = float(tags['EXIF:GPSAltitude'])
+            alt = float(tags['XMP:RelativeAltitude'])
             dtgi = tags['EXIF:CreateDate']
         coords = [long, lat, alt]
         linecoords.append(coords)
         try:
-            ptProps = {"File_Name": tags['File:FileName'], "Exposure Time": tags['EXIF:ExposureTime'],
+            ptProps = {"File_Name": tags['File:FileName'],
                        "Focal_Length": tags['EXIF:FocalLength'], "Date_Time": dtgi,
                        "Image_Width": imgwidth, "Image_Height": imghite,
                        "Heading": tags['XMP:FlightYawDegree'], "AbsoluteAltitude": alt,
@@ -324,6 +325,8 @@ def image_poly(imgar):
         alt = float(prps["Relative_Altitude"])
         # print(wid, hite, alt, focal_lgth, gimx, gimy, gimz, head)
         calc1, calc2 = get_area(wid, hite, alt, focal_lgth)
+        #calc1 = calc1 / 1.87
+        #calc2 = calc2 / 1.87
         # create geodataframe with some variables
         gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc1, 'height': calc2}, index=[1])
         repo = convert_wgs_to_utm(lng, lat)
@@ -337,9 +340,56 @@ def image_poly(imgar):
         # change crs of dataframe to projected crs to enable use of distance for width/height
         # gf = gf.to_crs(epsg=repo)
         gf = gf.to_crs(epsg=3857)
+        #gf = gf.to_crs(epsg=4978)
+        # calculate bounding box distance between corners to fix proportions distorsion due to EPSG:3857
+        from shapely.geometry import Point
+        pnt1 = Point(80.99456, 7.86795)
+        pnt2 = Point(80.97454, 7.872174)
+        points_df = gp.GeoDataFrame({'geometry': [pnt1, pnt2]}, crs='EPSG:4326')
+        points_df = points_df.to_crs('EPSG:5234')
+        points_df2 = points_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
+        print(points_df.distance(points_df2))
+
+        prescaled_poly = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
+        x, y = prescaled_poly.exterior.coords.xy
+        print(x)
+        print(y)
+        top_left = Point(x[1], y[1])
+        top_right = Point(x[0], y[0])
+        width_df = gp.GeoDataFrame({'geometry': [top_left, top_right]}, crs='EPSG:3857')
+        #width_df = width_df.to_crs('EPSG:3857')
+        width_df2 = width_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
+        print(width_df.distance(width_df2))
+
+        lower_left = Point(x[2], y[2])
+        lower_right = Point(x[3], y[3])
+        height_df = gp.GeoDataFrame({'geometry': [top_right, lower_right]}, crs='EPSG:3857')
+        #height_df = height_df.to_crs('EPSG:3857')
+        height_df2 = height_df.shift()
+        print(height_df.distance(height_df2))
+
+        # Vincenty's Inverse method (source: https://nathanrooy.github.io/posts/2016-12-18/vincenty-formula-with-python/)
+        # width scale factor
+        width_df_vincenty = width_df.to_crs('EPSG:4326')
+        width_df_vincenty['points'] = width_df_vincenty.apply(lambda x: [y for y in x['geometry'].coords], axis=1)
+        width_vicenty_points = width_df_vincenty.to_dict('records')
+        wth_pnt_topleft = [width_vicenty_points[0]['points'][0][1], width_vicenty_points[0]['points'][0][0]]
+        wth_pnt_topright = [width_vicenty_points[1]['points'][0][1], width_vicenty_points[1]['points'][0][0]]
+        width_scaling_factor = vincenty_inverse(wth_pnt_topleft, wth_pnt_topright).m
+        print(width_scaling_factor)
+        # height scale factor
+        height_df_vincenty = height_df.to_crs('EPSG:4326')
+        height_df_vincenty['points'] = height_df_vincenty.apply(lambda x: [y for y in x['geometry'].coords], axis=1)
+        height_vicenty_points = height_df_vincenty.to_dict('records')
+        hgt_pnt_topright = [height_vicenty_points[0]['points'][0][1], height_vicenty_points[0]['points'][0][0]]
+        hgt_pnt_lowerright = [height_vicenty_points[1]['points'][0][1], height_vicenty_points[1]['points'][0][0]]
+        height_scaling_factor = vincenty_inverse(hgt_pnt_topright, hgt_pnt_lowerright).m
+        print(height_scaling_factor)
+
         # create polygon using width and height
         gf['center'] = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
-        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width'], x['height']), axis=1)
+        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width']/width_scaling_factor, x['height']/height_scaling_factor), axis=1)
+        #gf['polygon'] = gf['center']
         gf = gf.set_geometry('polygon')
         geopoly = gf['polygon'].to_json()
         g1 = geojson.loads(geopoly)
@@ -379,6 +429,7 @@ def image_poly(imgar):
     projected = partial(
         pyproj.transform,
         pyproj.Proj(init='epsg:3857'),  # source coordinate system
+        #pyproj.Proj(init='epsg:4978'),  # source coordinate system
         pyproj.Proj(init='epsg:4326'))  # destination coordinate system
     g3 = transform(projected, poly)
     pop3 = geojson.dumps(g3)
@@ -400,8 +451,16 @@ def get_area(wd, ht, alt, fl):
     :param head:
     :return:
     """
-    sw = 8
-    sh = 5.3
+    #sw = 8 # INCORRECT Hasselblad L1D-20c
+    #sh = 5.3 # INCORRECT Hasselblad L1D-20c
+    #sw = 13.2 # Hasselblad L1D-20c
+    #sh = 8.8 # Hasselblad L1D-20c
+    sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
+    sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
+    #sw = 6.17 # DJI Phantom 4
+    #sh = 4.55 # DJI Phantom 4
+    #sw = 10.88 # DJI XT2 (640 x 17 [um]) / 1000 [um/mm] mm
+    #sh = 8.704 # DJI XT2 (512 x 17 [um]) / 1000 [um/mm] mm
 
     xview = 2 * degrees(atan(sw / (2 * fl)))
     yview = 2 * degrees(atan(sh / (2 * fl)))
