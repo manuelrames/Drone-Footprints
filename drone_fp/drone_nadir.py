@@ -161,9 +161,9 @@ def read_exif(files):
     exif_array = []
     filename = file_name
     bar = Bar('Reading EXIF Data', max=len(files))
-    with exiftool.ExifTool() as et:
+    with exiftool.ExifToolHelper() as et:
         # print(color.BLUE + "Scanning image exif tags " + color.END)
-        metadata = iter(et.get_metadata_batch(files))
+        metadata = iter(et.get_metadata(files))
     for d in metadata:
         exif_array.append(d)
         bar.next()
@@ -180,7 +180,7 @@ def format_data(exif_array):
     :return:
     """
     sls = json.dumps(exif_array)
-    print(sls)
+    #print(sls)
     print("How many records?", len(sls))
     try:
         exif_array.sort(key=itemgetter('EXIF:DateTimeOriginal'))
@@ -311,13 +311,17 @@ def image_poly(imgar):
         lat = float(cent['coords'][1])
         lng = float(cent['coords'][0])
         prps = cent['props']
+        print("\nGeoprojecting image -> %s" % prps['File_Name'])
         wid= prps['Image_Width']
         hite = prps['Image_Height']
         head = float(prps['Heading'])
         try:
             gimy = float(prps['GimbalRollDegree'])
+            print("Gimbal Roll Degree = %s" % str(gimy))
             gimx = float(prps['GimbalPitchDegree'])
+            print("Gimbal Pitch Degree = %s" % str(gimx))
             gimz = float(prps['GimbalYawDegree'])
+            print("Gimbal Yaw Degree = %s" % str(gimz))
         except:
             gimz = 0
         img_n = prps['File_Name']
@@ -334,7 +338,7 @@ def image_poly(imgar):
         #gf.crs = fiona.crs.from_epsg(4326)
 
         # create center as a shapely geometry point type and set geometry of dataframe to this
-        gf['center'] = gf.apply(lambda x: shapely.geometry.Point(x['lon'], x['lat']), axis=1)
+        gf['center'] = gf.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
         gf = gf.set_geometry('center')
         gf.crs = fiona.crs.from_epsg(4326)
         # change crs of dataframe to projected crs to enable use of distance for width/height
@@ -342,31 +346,31 @@ def image_poly(imgar):
         gf = gf.to_crs(epsg=3857)
         #gf = gf.to_crs(epsg=4978)
         # calculate bounding box distance between corners to fix proportions distorsion due to EPSG:3857
-        from shapely.geometry import Point
-        pnt1 = Point(80.99456, 7.86795)
-        pnt2 = Point(80.97454, 7.872174)
-        points_df = gp.GeoDataFrame({'geometry': [pnt1, pnt2]}, crs='EPSG:4326')
-        points_df = points_df.to_crs('EPSG:5234')
-        points_df2 = points_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
-        print(points_df.distance(points_df2))
+        #pnt1 = Point(80.99456, 7.86795)
+        #pnt2 = Point(80.97454, 7.872174)
+        #points_df = gp.GeoDataFrame({'geometry': [pnt1, pnt2]}, crs='EPSG:4326')
+        #points_df = points_df.to_crs('EPSG:5234')
+        #points_df2 = points_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
+        #print(points_df.distance(points_df2))
 
+        # calculate bounding box distance between corners to fix proportions distorsion due to EPSG:3857
         prescaled_poly = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
         x, y = prescaled_poly.exterior.coords.xy
-        print(x)
-        print(y)
+        #print(x)
+        #print(y)
         top_left = Point(x[1], y[1])
         top_right = Point(x[0], y[0])
         width_df = gp.GeoDataFrame({'geometry': [top_left, top_right]}, crs='EPSG:3857')
         #width_df = width_df.to_crs('EPSG:3857')
         width_df2 = width_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
-        print(width_df.distance(width_df2))
+        #print(width_df.distance(width_df2))
 
-        lower_left = Point(x[2], y[2])
+        #lower_left = Point(x[2], y[2])
         lower_right = Point(x[3], y[3])
         height_df = gp.GeoDataFrame({'geometry': [top_right, lower_right]}, crs='EPSG:3857')
         #height_df = height_df.to_crs('EPSG:3857')
         height_df2 = height_df.shift()
-        print(height_df.distance(height_df2))
+        #print(height_df.distance(height_df2))
 
         # Vincenty's Inverse method (source: https://nathanrooy.github.io/posts/2016-12-18/vincenty-formula-with-python/)
         # width scale factor
@@ -376,7 +380,7 @@ def image_poly(imgar):
         wth_pnt_topleft = [width_vicenty_points[0]['points'][0][1], width_vicenty_points[0]['points'][0][0]]
         wth_pnt_topright = [width_vicenty_points[1]['points'][0][1], width_vicenty_points[1]['points'][0][0]]
         width_scaling_factor = vincenty_inverse(wth_pnt_topleft, wth_pnt_topright).m
-        print(width_scaling_factor)
+        print("Width scaling factor: %f" % width_scaling_factor)
         # height scale factor
         height_df_vincenty = height_df.to_crs('EPSG:4326')
         height_df_vincenty['points'] = height_df_vincenty.apply(lambda x: [y for y in x['geometry'].coords], axis=1)
@@ -384,7 +388,7 @@ def image_poly(imgar):
         hgt_pnt_topright = [height_vicenty_points[0]['points'][0][1], height_vicenty_points[0]['points'][0][0]]
         hgt_pnt_lowerright = [height_vicenty_points[1]['points'][0][1], height_vicenty_points[1]['points'][0][0]]
         height_scaling_factor = vincenty_inverse(hgt_pnt_topright, hgt_pnt_lowerright).m
-        print(height_scaling_factor)
+        print("Height scaling factor: %f" % height_scaling_factor)
 
         # create polygon using width and height
         gf['center'] = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
@@ -403,15 +407,15 @@ def image_poly(imgar):
             header = 360 - (gimz)
         # print(header)
         ngf = affinity.rotate(g2, header, origin='centroid')
-        print("NGF", ngf)
+        #print("NGF", ngf)
         over_poly.append(ngf)
         # therepo = 'epsg:' + repo
         # darepo = therepo
         project = partial(
             pyproj.transform,
             # pyproj.Proj(init=darepo),
-            pyproj.Proj(init='epsg:3857'),  # source coordinate system
-            pyproj.Proj(init='epsg:4326'))  # destination coordinate system
+            pyproj.Proj('epsg:3857'),  # source coordinate system
+            pyproj.Proj('epsg:4326'))  # destination coordinate system
         g2 = transform(project, ngf)
         # Create GeoJSON
         wow3 = geojson.dumps(g2)
@@ -428,9 +432,9 @@ def image_poly(imgar):
     poly = union_buffered_poly.simplify(10, preserve_topology=False)
     projected = partial(
         pyproj.transform,
-        pyproj.Proj(init='epsg:3857'),  # source coordinate system
+        pyproj.Proj('epsg:3857'),  # source coordinate system
         #pyproj.Proj(init='epsg:4978'),  # source coordinate system
-        pyproj.Proj(init='epsg:4326'))  # destination coordinate system
+        pyproj.Proj('epsg:4326'))  # destination coordinate system
     g3 = transform(projected, poly)
     pop3 = geojson.dumps(g3)
     pop4 = json.loads(pop3)
@@ -453,10 +457,10 @@ def get_area(wd, ht, alt, fl):
     """
     #sw = 8 # INCORRECT Hasselblad L1D-20c
     #sh = 5.3 # INCORRECT Hasselblad L1D-20c
-    #sw = 13.2 # Hasselblad L1D-20c
-    #sh = 8.8 # Hasselblad L1D-20c
-    sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
-    sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
+    sw = 13.2 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    sh = 8.8 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    #sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
+    #sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
     #sw = 6.17 # DJI Phantom 4
     #sh = 4.55 # DJI Phantom 4
     #sw = 10.88 # DJI XT2 (640 x 17 [um]) / 1000 [um/mm] mm

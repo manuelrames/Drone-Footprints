@@ -290,8 +290,8 @@ def image_poly(imgar):
         p2 = convert_wgs_to_utm(lng, lat)
         project = partial(
             pyproj.transform,
-            pyproj.Proj(init='epsg:4326'),  # source coordinate system
-            pyproj.Proj(init='epsg:%s' % p2))  # destination coordinate system
+            pyproj.Proj('epsg:4326'),  # source coordinate system
+            pyproj.Proj('epsg:%s' % p2))  # destination coordinate system
         g2 = transform(project, poly)
         over_poly.append(g2)
 
@@ -308,8 +308,8 @@ def image_poly(imgar):
     polyz = union_buffered_poly.simplify(0.005, preserve_topology=False)
     projected = partial(
         pyproj.transform,
-        pyproj.Proj(init='epsg:%s' % p2),  # source coordinate system
-        pyproj.Proj(init='epsg:4326'))  # destination coordinate system
+        pyproj.Proj('epsg:%s' % p2),  # source coordinate system
+        pyproj.Proj('epsg:4326'))  # destination coordinate system
     g3 = transform(projected, polyz)
     pop3 = geojson.dumps(g3)
     pop4 = json.loads(pop3)
