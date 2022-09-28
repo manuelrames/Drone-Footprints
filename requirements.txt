@@ -11,5 +11,4 @@ progress
 shapely
 geometry
 quaternion
-numpy
 progressbar
