@@ -214,7 +214,8 @@ def format_data(exif_array):
             imghite = tags['EXIF:ExifImageHeight']
             alt = float(tags['XMP:RelativeAltitude'])
             dtgi = tags['EXIF:CreateDate']
-        coords = [long, lat, alt]
+        #coords = [long, lat, alt]
+        coords = [lat, long, alt]
         linecoords.append(coords)
         try:
             ptProps = {"File_Name": tags['File:FileName'],
@@ -333,6 +334,7 @@ def image_poly(imgar):
         #calc2 = calc2 / 1.87
         # create geodataframe with some variables
         gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc1, 'height': calc2}, index=[1])
+        #gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc2, 'height': calc1}, index=[1])
         repo = convert_wgs_to_utm(lng, lat)
         repo = '%g'%(float(repo))
         #gf.crs = fiona.crs.from_epsg(4326)
@@ -378,7 +380,9 @@ def image_poly(imgar):
         width_df_vincenty['points'] = width_df_vincenty.apply(lambda x: [y for y in x['geometry'].coords], axis=1)
         width_vicenty_points = width_df_vincenty.to_dict('records')
         wth_pnt_topleft = [width_vicenty_points[0]['points'][0][1], width_vicenty_points[0]['points'][0][0]]
+        wth_pnt_topleft.reverse()
         wth_pnt_topright = [width_vicenty_points[1]['points'][0][1], width_vicenty_points[1]['points'][0][0]]
+        wth_pnt_topright.reverse()
         width_scaling_factor = vincenty_inverse(wth_pnt_topleft, wth_pnt_topright).m
         print("Width scaling factor: %f" % width_scaling_factor)
         # height scale factor
@@ -386,13 +390,19 @@ def image_poly(imgar):
         height_df_vincenty['points'] = height_df_vincenty.apply(lambda x: [y for y in x['geometry'].coords], axis=1)
         height_vicenty_points = height_df_vincenty.to_dict('records')
         hgt_pnt_topright = [height_vicenty_points[0]['points'][0][1], height_vicenty_points[0]['points'][0][0]]
+        hgt_pnt_topright.reverse()
         hgt_pnt_lowerright = [height_vicenty_points[1]['points'][0][1], height_vicenty_points[1]['points'][0][0]]
+        hgt_pnt_lowerright.reverse()
         height_scaling_factor = vincenty_inverse(hgt_pnt_topright, hgt_pnt_lowerright).m
         print("Height scaling factor: %f" % height_scaling_factor)
 
         # create polygon using width and height
         gf['center'] = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
-        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width']/width_scaling_factor, x['height']/height_scaling_factor), axis=1)
+        #gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width']/width_scaling_factor, x['height']/height_scaling_factor), axis=1)
+        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['height'] / width_scaling_factor,
+                                                                  x['width'] / height_scaling_factor), axis=1)
+        #gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width'],
+        #                                                          x['height']), axis=1)
         #gf['polygon'] = gf['center']
         gf = gf.set_geometry('polygon')
         geopoly = gf['polygon'].to_json()
@@ -457,10 +467,10 @@ def get_area(wd, ht, alt, fl):
     """
     #sw = 8 # INCORRECT Hasselblad L1D-20c
     #sh = 5.3 # INCORRECT Hasselblad L1D-20c
-    sw = 13.2 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
-    sh = 8.8 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
-    #sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
-    #sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
+    #sw = 13.2 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    #sh = 8.8 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
+    sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
     #sw = 6.17 # DJI Phantom 4
     #sh = 4.55 # DJI Phantom 4
     #sw = 10.88 # DJI XT2 (640 x 17 [um]) / 1000 [um/mm] mm
