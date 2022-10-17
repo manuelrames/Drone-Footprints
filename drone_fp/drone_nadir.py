@@ -205,14 +205,16 @@ def format_data(exif_array):
             long = float(tags['XMP:Longitude'])
             imgwidth = tags['EXIF:ImageWidth']
             imghite = tags['EXIF:ImageHeight']
-            alt = float(tags['XMP:RelativeAltitude'])
+            #alt = float(tags['XMP:RelativeAltitude'])
+            alt = float(tags['XMP:AbsoluteAltitude'])
             dtgi = tags['EXIF:DateTimeOriginal']
         except KeyError as e:
             lat = float(tags['Composite:GPSLatitude'])
             long = float(tags['Composite:GPSLongitude'])
             imgwidth = tags['EXIF:ExifImageWidth']
             imghite = tags['EXIF:ExifImageHeight']
-            alt = float(tags['XMP:RelativeAltitude'])
+            #alt = float(tags['XMP:RelativeAltitude'])
+            alt = float(tags['XMP:AbsoluteAltitude'])
             dtgi = tags['EXIF:CreateDate']
         #coords = [long, lat, alt]
         coords = [lat, long, alt]
@@ -229,11 +231,11 @@ def format_data(exif_array):
                        "GimbalPitchDegree": tags['XMP:GimbalPitchDegree'],
                        "EXIF:DateTimeOriginal": tags['EXIF:DateTimeOriginal']}
         except KeyError as ke:
-            ptProps = {"File_Name": tags['File:FileName'], "Exposure Time": tags['EXIF:ExposureTime'],
+            ptProps = {"File_Name": tags['File:FileName'],
                        "Focal_Length": tags['EXIF:FocalLength'], "Date_Time": dtgi,
-                       "Image_Width": imgwidth, "Image_Height": imghite, "Heading": tags['EXIF:GPSImgDirection'],
+                       "Image_Width": imgwidth, "Image_Height": imghite, "Heading": tags['XMP:FlightYawDegree'],
                        "AbsoluteAltitude": alt,
-                       "Relative_Altitude": alt,
+                       "Relative_Altitude": tags['XMP:RelativeAltitude'],
                        "EXIF:DateTimeOriginal": tags['EXIF:DateTimeOriginal']}
         if i == 1:
             datetime = dtgi
@@ -312,7 +314,8 @@ def image_poly(imgar):
         lat = float(cent['coords'][1])
         lng = float(cent['coords'][0])
         prps = cent['props']
-        print("\nGeoprojecting image -> %s" % prps['File_Name'])
+        print("\n---------------------------------------------------------------------------")
+        print("Geoprojecting image -> %s" % prps['File_Name'])
         wid= prps['Image_Width']
         hite = prps['Image_Height']
         head = float(prps['Heading'])
@@ -333,7 +336,7 @@ def image_poly(imgar):
         #calc1 = calc1 / 1.87
         #calc2 = calc2 / 1.87
         # create geodataframe with some variables
-        gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc1, 'height': calc2}, index=[1])
+        gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc2, 'height': calc1}, index=[1])
         #gf = gp.GeoDataFrame({'lat': lat, 'lon': lng, 'width': calc2, 'height': calc1}, index=[1])
         repo = convert_wgs_to_utm(lng, lat)
         repo = '%g'%(float(repo))
@@ -360,15 +363,15 @@ def image_poly(imgar):
         x, y = prescaled_poly.exterior.coords.xy
         #print(x)
         #print(y)
-        top_left = Point(x[1], y[1])
-        top_right = Point(x[0], y[0])
+        top_right = Point(x[1], y[1])
+        top_left = Point(x[0], y[0])
         width_df = gp.GeoDataFrame({'geometry': [top_left, top_right]}, crs='EPSG:3857')
         #width_df = width_df.to_crs('EPSG:3857')
         width_df2 = width_df.shift()  # We shift the dataframe by 1 to align pnt1 with pnt2
         #print(width_df.distance(width_df2))
 
-        #lower_left = Point(x[2], y[2])
-        lower_right = Point(x[3], y[3])
+        lower_right = Point(x[2], y[2])
+        #lower_left = Point(x[3], y[3])
         height_df = gp.GeoDataFrame({'geometry': [top_right, lower_right]}, crs='EPSG:3857')
         #height_df = height_df.to_crs('EPSG:3857')
         height_df2 = height_df.shift()
@@ -381,8 +384,10 @@ def image_poly(imgar):
         width_vicenty_points = width_df_vincenty.to_dict('records')
         wth_pnt_topleft = [width_vicenty_points[0]['points'][0][1], width_vicenty_points[0]['points'][0][0]]
         wth_pnt_topleft.reverse()
+        print("Width Point Top Left: %s" % str(wth_pnt_topleft))
         wth_pnt_topright = [width_vicenty_points[1]['points'][0][1], width_vicenty_points[1]['points'][0][0]]
         wth_pnt_topright.reverse()
+        print("Width Point Top Right: %s" % str(wth_pnt_topright))
         width_scaling_factor = vincenty_inverse(wth_pnt_topleft, wth_pnt_topright).m
         print("Width scaling factor: %f" % width_scaling_factor)
         # height scale factor
@@ -391,16 +396,18 @@ def image_poly(imgar):
         height_vicenty_points = height_df_vincenty.to_dict('records')
         hgt_pnt_topright = [height_vicenty_points[0]['points'][0][1], height_vicenty_points[0]['points'][0][0]]
         hgt_pnt_topright.reverse()
+        print("Height Point Top Right: %s" % str(hgt_pnt_topright))
         hgt_pnt_lowerright = [height_vicenty_points[1]['points'][0][1], height_vicenty_points[1]['points'][0][0]]
         hgt_pnt_lowerright.reverse()
+        print("Height Point Lower Right: %s" % str(hgt_pnt_lowerright))
         height_scaling_factor = vincenty_inverse(hgt_pnt_topright, hgt_pnt_lowerright).m
         print("Height scaling factor: %f" % height_scaling_factor)
 
         # create polygon using width and height
         gf['center'] = shapely.geometry.box(*gf['center'].buffer(1).total_bounds)
         #gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width']/width_scaling_factor, x['height']/height_scaling_factor), axis=1)
-        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['height'] / width_scaling_factor,
-                                                                  x['width'] / height_scaling_factor), axis=1)
+        gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width'] / width_scaling_factor,
+                                                                   x['height'] / height_scaling_factor), axis=1)
         #gf['polygon'] = gf.apply(lambda x: shapely.affinity.scale(x['center'], x['width'],
         #                                                          x['height']), axis=1)
         #gf['polygon'] = gf['center']
@@ -437,6 +444,7 @@ def image_poly(imgar):
         # pyGeom = dict(type="Polygon", coordinates=wow4)
         gd_feat = dict(type="Feature", geometry=wow4, properties=prps)
         polys.append(gd_feat)
+        print("---------------------------------------------------------------------------")
         bar.next()
     union_buffered_poly = cascaded_union([l.buffer(.00001) for l in over_poly])
     poly = union_buffered_poly.simplify(10, preserve_topology=False)
@@ -467,10 +475,10 @@ def get_area(wd, ht, alt, fl):
     """
     #sw = 8 # INCORRECT Hasselblad L1D-20c
     #sh = 5.3 # INCORRECT Hasselblad L1D-20c
-    #sw = 13.2 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
-    #sh = 8.8 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
-    sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
-    sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
+    sw = 13.2 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    sh = 8.8 # Hasselblad L1D-20c (DJI FC6310 -> Phantom 4 PRO)
+    #sw = 7.68 # DJI ZH20T (640 x 12 [um]) / 1000 [um/mm] mm
+    #sh = 6.144 # DJI ZH20T (512 x 12 [um]) / 1000 [um/mm] mm
     #sw = 6.17 # DJI Phantom 4
     #sh = 4.55 # DJI Phantom 4
     #sw = 10.88 # DJI XT2 (640 x 17 [um]) / 1000 [um/mm] mm
